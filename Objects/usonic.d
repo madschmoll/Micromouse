@@ -1,0 +1,14 @@
+.\objects\usonic.o: usonic.c
+.\objects\usonic.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+.\objects\usonic.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdbool.h
+.\objects\usonic.o: usonic.h
+.\objects\usonic.o: ..\..\..\..\inc/hw_types.h
+.\objects\usonic.o: ..\..\..\..\inc/hw_memmap.h
+.\objects\usonic.o: ..\..\..\..\inc/hw_gpio.h
+.\objects\usonic.o: ..\..\..\..\driverlib/sysctl.h
+.\objects\usonic.o: ..\..\..\..\driverlib/pin_map.h
+.\objects\usonic.o: ..\..\..\..\driverlib/rom_map.h
+.\objects\usonic.o: ..\..\..\..\driverlib/gpio.h
+.\objects\usonic.o: ..\..\..\..\driverlib/timer.h
+.\objects\usonic.o: ..\..\..\..\driverlib/interrupt.h
+.\objects\usonic.o: ..\..\..\..\inc/tm4c123gh6pm.h

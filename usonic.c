@@ -37,6 +37,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
+#include <stdio.h>
 #include "usonic.h"
 #include "inc/hw_types.h"
 #include "inc/hw_memmap.h"
@@ -48,8 +50,9 @@
 #include "driverlib/timer.h"
 #include "driverlib/interrupt.h"
 #include "inc/tm4c123gh6pm.h"
+#include "driverlib/uart.h"
 
-uint32_t start, stop, time, distance1 = 0, distance2 = 0, distance3 = 0;
+uint32_t start, stop, time, distanceL = 0, distanceR = 0, distanceF = 0;
 
 #define RED 0x02
 #define BLUE 0x04
@@ -58,37 +61,67 @@ uint32_t start, stop, time, distance1 = 0, distance2 = 0, distance3 = 0;
 #define BLUEPIN GPIO_PIN_2
 #define GREENPIN GPIO_PIN_3
 
-//*****************************************************************************
-void
+char rxChar[10];
+char txChar;
+uint8_t  timer=60;
+char dir='f'; 
+char dirstring[10];
+uint8_t indx=0;
+
+////*****************************************************************************
+
+//********************************************************************************
+// Init Fuctions
+void 
 PortFunctionInit(void)
-{
-    // Enable Peripheral Clocks 
+{	
+		
+		// Enable Peripheral Clocks 
 	  SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
+		SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
+		SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+		SYSCTL_RCGC2_R |= SYSCTL_RCGC2_GPIOF|SYSCTL_RCGC2_GPIOC|SYSCTL_RCGC2_GPIOA|SYSCTL_RCGC2_GPIOB|SYSCTL_RCGC2_GPIOE|SYSCTL_RCGC2_GPIOD;
 	
-    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2); // Enable pin PB2 for GPIOInput -- hook up echo 1
+		// Enable pins for motors
+		GPIOPinTypeGPIOOutput(GPIO_PORTA_BASE,GPIO_PIN_2|GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5);
+		
+		// Left Sensor
+    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2); 			// Enable pin PB2 for GPIOInput -- hook up echo 1
 	  GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_1);  //Enable pin PB1 for GPIOOutput -- hook up trig 1
 	
+		// Right Sensor
 		GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_0); // Enable pin PB0 for GPIOInput -- hook up echo 2
 	  GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_3);  //Enable pin PB3 for GPIOOutput -- hook up trig 2
 	
-//		GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_5); // Enable pin PB5 for GPIOInput -- hook up echo 3
-//	  GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_4);  //Enable pin PB4 for GPIOOutput -- hook up trig 3
+		// Front Sensor
+		GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_5); // Enable pin PB5 for GPIOInput -- hook up echo 3
+	  GPIOPinTypeGPIOOutput(GPIO_PORTB_BASE, GPIO_PIN_4);  //Enable pin PB4 for GPIOOutput -- hook up trig 3
 	
 		// enable LEDS for output 
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1);
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_2);
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_3);
+		
+		// Enable Timer for motors
+		MAP_GPIOPinTypeTimer(GPIO_PORTB_BASE, GPIO_PIN_7);   //Enable pin PB7 for TIMER0 T0CCP1
+    MAP_GPIOPinConfigure(GPIO_PB6_T0CCP0);               
+    MAP_GPIOPinTypeTimer(GPIO_PORTB_BASE, GPIO_PIN_6);   //Enable pin PB6 for TIMER0 T0CCP0
+		
+		
+		
 
 }
-// Timer Init
+// Timer Inits 
 void Timer0A_Init(void)
 {
-//	SysCtlClockSet(SYSCTL_SYSDIV_10 | SYSCTL_USE_PLL |  SYSCTL_XTAL_16MHZ | SYSCTL_OSC_MAIN); // set clock to 20MHz
+	//	SysCtlClockSet(SYSCTL_SYSDIV_10 | SYSCTL_USE_PLL |  SYSCTL_XTAL_16MHZ | SYSCTL_OSC_MAIN); // set clock to 20MHz
 	TimerConfigure(TIMER0_BASE, TIMER_CFG_PERIODIC); // configure timer
 	TimerClockSourceSet(TIMER0_BASE, TIMER_CLOCK_SYSTEM);
-	TimerLoadSet(TIMER0_BASE, TIMER_A, 1999999); // reload value into timer
+	TimerLoadSet(TIMER0_BASE, TIMER_A, 1600000 - 1); // reload value into timer
 	IntPrioritySet(INT_TIMER0A, 0x01); // timer has priority 
 	IntEnable(INT_TIMER0A); // enable interuupt
 	TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT); // ARM timeout interrupt
@@ -96,103 +129,303 @@ void Timer0A_Init(void)
 
 }
 
-void getDistanceOne(void){
+void Timer1A_Init(){
+	
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER1);
+	TimerConfigure(TIMER1_BASE, TIMER_CFG_PERIODIC); // configure timer
+	TimerLoadSet(TIMER1_BASE, TIMER_A, 1600000 - 1 ); // reload value into timer 
+	IntPrioritySet(INT_TIMER1A, 0x01); // timer has first (1st) priority
+	IntEnable(INT_TIMER1A); // enable interuupt
+	TimerIntEnable(TIMER1_BASE, TIMER_TIMA_TIMEOUT); // ARM timeout interrupt
+	TimerEnable(TIMER1_BASE, TIMER_A); // enable subtimer 1A of timer 1
+
+}
+
+// ********************************************************************************
+// UART Functions 
+void configureUART2(void){
+	// configure UART2 - 9600 baud 8 N 1
+	//PD6 for TXD on bluetooth module	
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART2);
+  SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
+  GPIOPinConfigure(GPIO_PD6_U2RX);
+	GPIOPinTypeUART(GPIO_PORTD_BASE, GPIO_PIN_6);
+	UARTConfigSetExpClk(UART2_BASE, SysCtlClockGet(), 9600,
+        (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE));
+	// enable interrupt
+	IntPrioritySet(INT_UART2, 0x08); 
+	IntEnable(INT_UART2);
+	UARTIntEnable(UART2_BASE, UART_INT_RX);
+}
+
+void configureUART3(void){
+	// configure UART3 -- 9600 baud 8 N 1
+	// PC7 for rx on RN42
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_UART3);
+	SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
+	GPIOPinConfigure(GPIO_PC7_U3TX);
+	GPIOPinTypeUART(GPIO_PORTC_BASE, GPIO_PIN_7);
+	UARTConfigSetExpClk(UART3_BASE, SysCtlClockGet(), 9600,
+			(UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE));
+	// enable interrupt
+	IntPrioritySet(INT_UART3, 0x01); 
+	IntEnable(INT_UART3);
+	UARTIntEnable(UART3_BASE, UART_INT_TX);
+}
+void writeCharToUart3(char c){
+	while (UART3_FR_R & UART_FR_TXFF); //wait for tx to not be full
+	UART3_DR_R = c; // write a char to UART 3
+}
+
+
+void writeStringToUart3(char* string){ // write a string to UART 3
+    for (int i = 0; i < strlen(string); i++){
+			writeCharToUart3(string[i]); 
+		}
+}
+void UART2_Handler(){ // UART 2 ISR to recieve data from RN42  
+
+GPIOPinWrite(GPIO_PORTF_BASE, GREENPIN, GREEN);
+    rxChar[indx] = UART2_DR_R;
+		indx++;
+		// test data recieving with LED commands 
+		if(rxChar[indx-1]==13)
+		{
+			rxChar[indx-1]='\0'; 
+			if(strcmp(rxChar,"red")==0)
+				GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0X02);
+			if(strcmp(rxChar,"blue")==0)
+				GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_2, 0X04);
+			if(strcmp(rxChar,"green")==0)
+				GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, 0X08);
+			indx=0;
+		}
+
+    UART2_ICR_R=UART_ICR_RXIC;	//clear interrupt
+}
+
+
+void UART3_Handler(){ // UART 3 ISR to transmit data over RN42 
+		txChar = UART3_DR_R;
+    UART3_ICR_R=UART_ICR_TXIC; //clear interrupt
+}
+
+// ********************************************************************************
+
+
+// ********************************************************************************
+// Distance Calculations
+void getDistanceLeft(void){
 	
 	while(!GPIOPinRead(GPIO_PORTB_BASE,GPIO_PIN_2)){} // while echo is low, do nothing
 	start = TimerValueGet(TIMER0_BASE, TIMER_A); // when echo becomes high, record value as start time
 	while(GPIOPinRead(GPIO_PORTB_BASE,GPIO_PIN_2)){} // while echo is high, do nothing
 	stop = TimerValueGet(TIMER0_BASE, TIMER_A); // when echo becomes low, record value as end time
 	time = start - stop; // time echo was high
-	distance1 = time / 942; // calculate distance based on time, clock freq, and speed of sound
+	distanceL = time / 942; // calculate distance based on time, clock freq, and speed of sound
 	
 }
 
-void getDistanceTwo(void){
+void getDistanceRight(void){
 	
 	while(!GPIOPinRead(GPIO_PORTB_BASE,GPIO_PIN_0)){} // while echo is low, do nothing
 	start = TimerValueGet(TIMER0_BASE, TIMER_A); // when echo becomes high, record value as start time
 	while(GPIOPinRead(GPIO_PORTB_BASE,GPIO_PIN_0)){} // while echo is high, do nothing
 	stop = TimerValueGet(TIMER0_BASE, TIMER_A); // when echo becomes low, record value as end time
 	time = start - stop; // time echo was high
-	distance2 = time / 942; // calculate distance based on time, clock freq, and speed of sound
+	distanceR = time / 942; // calculate distance based on time, clock freq, and speed of sound
 	
 }
 
 
-void getDistanceThree(void){
+
+void getDistanceFront(void){
 	
 	while(!GPIOPinRead(GPIO_PORTB_BASE,GPIO_PIN_5)){} // while echo is low, do nothing
 	start = TimerValueGet(TIMER0_BASE, TIMER_A); // when echo becomes high, record value as start time
 	while(GPIOPinRead(GPIO_PORTB_BASE,GPIO_PIN_5)){} // while echo is high, do nothing
 	stop = TimerValueGet(TIMER0_BASE, TIMER_A); // when echo becomes low, record value as end time
 	time = start - stop; // time echo was high
-	distance3 = time / 942; // calculate distance based on time, clock freq, and speed of sound
+	distanceF = time / 942; // calculate distance based on time, clock freq, and speed of sound
 	
+}
+//********************************************************************************
+
+//********************************************************************************
+// Motor Movement Functions
+void turnRight(void){
+	// right on - forward
+	GPIO_PORTA_DATA_R &= ~0x04; 			// PA2 //Hbridge - in1;
+	GPIO_PORTA_DATA_R |= 0x08;        // PA3 //Hbridge - in2;
+	// left on - reverse
+	GPIO_PORTA_DATA_R |= 0x10; 			// PA4 //HBridge - digitalWrite(in3, HIGH);
+	GPIO_PORTA_DATA_R &= ~0x20;			// PA5   //HBridge - digitalWrite(in4, LOW);
+	dir = 'l'; 
+}
+
+void turnLeft(void){
+	// left on - forward
+	GPIO_PORTA_DATA_R &= ~0x10; 			// PA4 //HBridge - digitalWrite(in3, HIGH);
+	GPIO_PORTA_DATA_R |= 0x20;			// PA5   //HBridge - digitalWrite(in4, LOW);
+	// right on - reverse
+	GPIO_PORTA_DATA_R |= 0x04; 			// PA2 //Hbridge - in1;
+	GPIO_PORTA_DATA_R &= ~0x08;        // PA3 //Hbridge - in2;
+	dir = 'r';
+	
+}
+
+void moveForward(void){
+	// right on - forward
+	GPIO_PORTA_DATA_R &= ~0x04; 			// PA2 //Hbridge - in1;
+	GPIO_PORTA_DATA_R |= 0x08;        // PA3 //Hbridge - in2;
+	// left on - forward
+	GPIO_PORTA_DATA_R &= ~0x10; 			// PA4 //HBridge - digitalWrite(in3, HIGH);
+	GPIO_PORTA_DATA_R |= 0x20;			// PA5   //HBridge - digitalWrite(in4, LOW);
+}
+
+void reverse(void){
+	// left on - reverse
+	GPIO_PORTA_DATA_R |= 0x04; 			// PA2 //Hbridge - in1;
+	GPIO_PORTA_DATA_R &= ~0x08;        // PA3 //Hbridge - in2;
+	// right on - reverse
+	GPIO_PORTA_DATA_R |= 0x04; 			// PA2 //Hbridge - in1;
+	GPIO_PORTA_DATA_R &= ~0x08;        // PA3 //Hbridge - in2;
+}
+
+void turnLeftMotorOFF(void){
+	GPIO_PORTA_DATA_R &= ~0x04; 		// PA2 //Hbridge - in1;
+	GPIO_PORTA_DATA_R &= ~0x08;     // PA3 //Hbridge - in2;
+}
+
+void turnRightMotorOFF(void){
+	GPIO_PORTA_DATA_R &= ~0x10; 		// PA4  //HBridge - digitalWrite(in3, HIGH);
+	GPIO_PORTA_DATA_R &= ~0x20;     // PA5  //HBridge - digitalWrite(in4, LOW);
+}
+
+void turnAllMotorsOFF(void){
+	turnLeftMotorOFF();
+	turnRightMotorOFF();
+}
+
+//********************************************************************************
+
+//********************************************************************************
+// Timer Handlers
+void Timer1A_Handler(void)
+{	
+
+	if(timer>0){
+		timer--;
+	}
+
+	if(timer==0)
+	{
+		timer=20; //this will execute every 2 sec
+		if(dir == 'f'){	
+			char direction[] = "Moving Forward";
+			sprintf(dirstring,"%s",direction);
+			writeStringToUart3(dirstring);
+			writeStringToUart3("\n\r");
+		}
+		if(dir == 'r'){	
+			char direction[] = "Right Turn";
+			sprintf(dirstring,"%s",direction);
+			writeStringToUart3(dirstring);
+			writeStringToUart3("\n\r");
+			dir = 'f';
+		}
+		if(dir == 'l'){	
+			char direction[] = "Left Turn";
+			sprintf(dirstring,"%s",direction);
+			writeStringToUart3(dirstring);
+			writeStringToUart3("\n\r");
+			dir = 'f';
+		}
+	}
+
+	TIMER1_ICR_R=TIMER_ICR_TATOCINT; 
+
 }
 
 void Timer0A_Handler(void)
 {
-	// generate Trig pulse for Sensor 1
+	//	GPIOPinWrite(GPIO_PORTF_BASE, BLUEPIN, BLUE);
 	TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
 	GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_1, 0x00); // trig 1 low
 	GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_3, 0x00); // trig 2 low
-	GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_4, 0x00); // trig 3 low
+	//GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_4, 0x00); // trig 3 low
 	SysCtlDelay(80); // wait 
+	
+	// generate Trig pulse for Sensor 1 -- Left
 	GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_1, 0x02); // trig 1 high
 	SysCtlDelay(80); // wait
 	GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_1, 0x00); // trig 1 low
 	
-	getDistanceOne();
+	getDistanceLeft();
 	
-	// generate Trig pulse for Sensor 2
+	// generate Trig pulse for Sensor 2 -- Right
 	GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_3, 0x08); // trig 2 high
 	SysCtlDelay(80); // wait
 	GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_3, 0x00); // trig 2 low
 	
-	getDistanceTwo();
+	getDistanceRight();
 	
-//	// generate Trig pulse for Sensor 3
-//	GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_4, 0x10); // trig 3 high
-//	SysCtlDelay(80); // wait
-//	GPIOPinWrite(GPIO_PORTB_BASE, GPIO_PIN_4, 0x00); // trig 3 low
-//	
-//	getDistanceThree();
-//	
 }
+
+//********************************************************************************
 
 
 int main(void)
 {
 	PortFunctionInit();
+	configureUART2();
+	configureUART3();
 	Timer0A_Init();
+	Timer1A_Init(); 
 	IntMasterEnable();
 	
-	while(1){
+	while(1){ 
+//		moveForward();
+	//	SysCtlDelay(10000);
 		
-		
-		if((distance1 >= 2 && distance1 <= 15))
+		if((distanceL >= 2 && distanceL <= 30)) // if there's something on the left
 		{
+			// turn right
+			SysCtlDelay(10000);
+			turnRight();
+			GPIOPinWrite(GPIO_PORTF_BASE, GREENPIN, 0x00);
+			GPIOPinWrite(GPIO_PORTF_BASE, BLUEPIN, 0x00);
 			GPIOPinWrite(GPIO_PORTF_BASE, REDPIN, RED);
-		}
-		else {
-			GPIOPinWrite(GPIO_PORTF_BASE, REDPIN, 0x00);
+			SysCtlDelay(10000);
 			
 		}
 		
-		if((distance2 >= 2 && distance2 <= 15))
+		else if((distanceR >= 2 && distanceR <= 30)) // if there's something on the right
 		{
+			// turn left
+			SysCtlDelay(10000);
+			turnLeft();
+			GPIOPinWrite(GPIO_PORTF_BASE, GREENPIN, 0x00);
+			GPIOPinWrite(GPIO_PORTF_BASE, REDPIN, 0x00);
 			GPIOPinWrite(GPIO_PORTF_BASE, BLUEPIN, BLUE);
-		}
-		else {
-			GPIOPinWrite(GPIO_PORTF_BASE, BLUEPIN, 0x00);
+			SysCtlDelay(10000);
+			
 		}
 		
-		if((distance3 >= 2 && distance3 <= 15))
-		{
-			GPIOPinWrite(GPIO_PORTF_BASE, GREENPIN, GREEN);
-		}
-		else {
+		else if((distanceR >= 2 && distanceR <= 30) && (distanceL >= 2 && distanceL <= 30) ){
+			reverse();
 			GPIOPinWrite(GPIO_PORTF_BASE, GREENPIN, 0x00);
+			GPIOPinWrite(GPIO_PORTF_BASE, BLUEPIN, BLUE);
+			GPIOPinWrite(GPIO_PORTF_BASE, REDPIN, RED);
+			SysCtlDelay(10000);
+
+		}
+		else 
+		{
+			GPIOPinWrite(GPIO_PORTF_BASE, REDPIN, 0x00);
+			GPIOPinWrite(GPIO_PORTF_BASE, BLUEPIN, 0x00);
+			moveForward();
+			SysCtlDelay(10000); 
 		}
 	}
 }

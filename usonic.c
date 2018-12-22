@@ -313,7 +313,7 @@ void turnAllMotorsOFF(void){
 // Timer Handlers
 void Timer1A_Handler(void)
 {	
-
+	TimerIntClear(TIMER1_BASE, TIMER_TIMA_TIMEOUT);
 	if(timer>0){
 		timer--;
 	}
@@ -332,18 +332,14 @@ void Timer1A_Handler(void)
 			sprintf(dirstring,"%s",direction);
 			writeStringToUart3(dirstring);
 			writeStringToUart3("\n\r");
-			dir = 'f';
 		}
 		if(dir == 'l'){	
 			char direction[] = "Left Turn";
 			sprintf(dirstring,"%s",direction);
 			writeStringToUart3(dirstring);
 			writeStringToUart3("\n\r");
-			dir = 'f';
 		}
 	}
-
-	TIMER1_ICR_R=TIMER_ICR_TATOCINT; 
 
 }
 
@@ -400,7 +396,7 @@ int main(void)
 			
 		}
 		
-		else if((distanceR >= 2 && distanceR <= 30)) // if there's something on the right
+		else if((distanceR >= 5 && distanceR <= 30)) // if there's something on the right
 		{
 			// turn left
 			SysCtlDelay(10000);
@@ -412,7 +408,7 @@ int main(void)
 			
 		}
 		
-		else if((distanceR >= 2 && distanceR <= 30) && (distanceL >= 2 && distanceL <= 30) ){
+		else if((distanceR >= 5 && distanceR <= 30) && (distanceL >= 5 && distanceL <= 30) ){
 			reverse();
 			GPIOPinWrite(GPIO_PORTF_BASE, GREENPIN, 0x00);
 			GPIOPinWrite(GPIO_PORTF_BASE, BLUEPIN, BLUE);
@@ -429,4 +425,3 @@ int main(void)
 		}
 	}
 }
-
